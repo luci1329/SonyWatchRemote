@@ -222,7 +222,7 @@ struct ContentView: View {
             isLoading = false
             if let error = error, error.code != .Cancelled {
                 setError(error: error)
-            } else {
+            } else if error == nil {
                 requestError = nil
                 playHaptic(command: command)
             }
