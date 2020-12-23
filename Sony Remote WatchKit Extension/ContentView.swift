@@ -7,35 +7,6 @@
 
 import SwiftUI
 
-struct RemoteButton: Hashable {
-    var displayName: String!
-    var remoteValue: String?
-    private (set) var onPress: (() -> Void)!
-    private (set) var tag: Int!
-    
-    init(displayName: String, remoteValue: String, onPress: @escaping () -> Void) {
-        self.displayName = displayName
-        self.remoteValue = remoteValue
-        self.onPress = onPress
-        self.tag = -1
-    }
-    
-    init(displayName: String, tag: Int, onPress: @escaping () -> Void) {
-        self.displayName = displayName
-        self.remoteValue = ""
-        self.onPress = onPress
-        self.tag = tag
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(displayName + (remoteValue ?? ""))
-    }
-    
-    static func == (lhs: RemoteButton, rhs: RemoteButton) -> Bool {
-        lhs.displayName == rhs.displayName
-    }
-}
-
 enum RemoteCommand: String, CaseIterable {
     case VolumeUp = "VolumeUp"
     case VolumeDown = "VolumeDown"
@@ -65,51 +36,82 @@ enum RemoteCommand: String, CaseIterable {
 
 extension RemoteCommand {
     static func actionMenuArray() -> [RemoteCommand] {
-        return [.Power, .TV, .Guide, .Youtube, .Netflix]
+        return [.Power, .TV, .Guide, .Youtube, .Netflix, .Home]
+    }
+}
+
+enum ActiveSheet: Identifiable {
+    case Error, CredentialsInput, TvOptions
+    
+    var id: Int {
+        hashValue
     }
 }
 
 struct ContentView: View {
-    @State var isLoadingRemoteCommands = false
-    @State var displayActionMenu = false
     @State var commandHandler: ControlCommandHandler?
-    @State var showErrorAlert = false
-    @State var segmentedControlHighlightedTag = 0
+    @State var segmentedControlHighlightedTag = 1
     @State var hasCommands = false
+    @State var activeSheet: ActiveSheet?
+    @State var viewDidLoad = false
+    @State var isLoading = false
+    
     @State var requestError: RequestError? {
         didSet {
-            showErrorAlert = requestError != nil
+            activeSheet = requestError != nil ? .Error : nil
         }
     }
     
     private var requestHandler = RequestHandler()
     
-    init() {
-        fetchCommands()
-    }
-        
     var body: some View {
+        let tvIpInputProxy = Binding<String>(
+            get: { self.requestHandler.getTvIpInput() },
+            set: { self.requestHandler.setTvIpInput(ip: $0) }
+        )
+        
+        let tvPskInputProxy = Binding<String>(
+            get: { self.requestHandler.getTvPskInput() },
+            set: { self.requestHandler.setTvPskInput(psk: $0) }
+        )
+
         ZStack(alignment: .center) {
             mainContentView()
-            .blur(radius: isLoadingRemoteCommands ? 1 : 0)
             .progressViewStyle(CircularProgressViewStyle())
-            .edgesIgnoringSafeArea(.bottom)
-            .sheet(isPresented: $displayActionMenu, content: {actionMenuView()})
-            .alert(isPresented: $showErrorAlert, content: {
-                Alert(title: Text("Error"), message: Text(requestError!.errorMessage), dismissButton: .default(Text("Close"), action: {requestError = nil}))
+            .sheet(item: $activeSheet, content: { item in
+                switch item {
+                case .Error:
+                    errorAlertView(error: requestError!)
+                case .CredentialsInput:
+                    VStack {
+                        TextField("TV IP", text: tvIpInputProxy)
+                        SecureField("TV PSK", text: tvPskInputProxy)
+                        Button("Connect") {
+                            fetchCommands(fullReload: true)
+                            activeSheet = nil
+                        }
+                    }
+                case .TvOptions:
+                    actionMenuView()
+                }
             })
-            
-            if isLoadingRemoteCommands {
-                loadingProgressView()
+            .onAppear {
+                if !viewDidLoad {
+                    fetchCommands()
+                }
+                
+                viewDidLoad = true
             }
         }
+        .edgesIgnoringSafeArea(.bottom)
     }
     
-    func fetchCommands() {
-        isLoadingRemoteCommands = true
-        requestHandler.getRemoteCommands { (cmds, error) in
-            isLoadingRemoteCommands = false
-            
+    func fetchCommands(fullReload: Bool = false) {
+        isLoading = true
+        hasCommands = false
+        requestHandler.getRemoteCommands(fullReload: fullReload) { (cmds, error) in
+            isLoading = false
+
             guard let error = error else {
                 hasCommands = true
                 playHaptic(type: .success)
@@ -117,15 +119,10 @@ struct ContentView: View {
                 return
             }
             
-            setError(error: error)
+            if (error.code != .Cancelled) {
+                setError(error: error)
+            }
         }
-    }
-    
-    func loadingProgressView() -> some View {
-        ProgressView("Loading Remote Commands...")
-            .background(Color.black)
-            .opacity(0.8)
-            .multilineTextAlignment(.center)
     }
     
     func errorAlertView(error: RequestError) -> some View {
@@ -140,39 +137,36 @@ struct ContentView: View {
     
     func mainContentView() -> some View {
         VStack(spacing: 5, content: {
-            Text("Sony Remote").font(.headline)
+            HStack {
+                if isLoading {
+                    ProgressView().scaleEffect(0.5, anchor: .center).frame(width: 20, height: 10, alignment: .center)
+                }
+                Spacer()
+                Text("Sony Remote").font(.system(size: 15)).padding(.leading, isLoading ? 0 : 20)
+
+                Spacer()
+                FloatingButton(iconOn: "tv.circle.fill", iconOff: "tv.circle", size: 20, toggled: hasCommands)
+                    .onTapGesture {activeSheet = .CredentialsInput}
+            }
             GestureControlView(commandHandler: $commandHandler)
-                .overlay(gestureControlViewOverlay())
-            SegmentedControl(values: segmentedControlViews(), highlightedTag: $segmentedControlHighlightedTag)
+            SegmentedControl(values: segmentedControlViews())
                 .padding(.vertical, 5)
         })
     }
     
-    func gestureControlViewOverlay() -> some View {
-        GeometryReader { geometry in
-            FloatingButton(icon: "", size: 15, toggled: $hasCommands)
-                .position(x: geometry.size.width - 15, y: 15)
-                .onTapGesture {
-                    
-                }
-        }
-    }
-    
-    func segmentedControlViews() -> [RemoteButton] {
+    func segmentedControlViews() -> [AnyView] {
         [
-            RemoteButton(displayName: "Home", tag: 0, onPress: {
-                enableAppControl()
-                sendRemoteCommand(command: .Home)
-                segmentedControlHighlightedTag = 0
+            floatingButton(iconOff: "arrow.uturn.backward", size: 20, toggled: false, onPress: {
+                sendRemoteCommand(command: .Back)
             }),
-            RemoteButton(displayName: "TV", tag: 1, onPress: {
-                enableTvControl()
-                sendRemoteCommand(command: .TV)
+            floatingButton(iconOn: "square.grid.3x3.fill", iconOff: "square.grid.3x3", size: 20, toggled: segmentedControlHighlightedTag == 1, onPress: {
+                enableAppControl()
                 segmentedControlHighlightedTag = 1
             }),
-            RemoteButton(displayName: "Back", tag: 2, onPress: {
-                sendRemoteCommand(command: .Back)
-            })
+            floatingButton(iconOn: "tv.fill", iconOff: "tv", size: 20, toggled: segmentedControlHighlightedTag == 2, onPress: {
+                enableTvControl()
+                segmentedControlHighlightedTag = 2
+            }),
         ]
     }
     
@@ -182,23 +176,15 @@ struct ContentView: View {
             GridItem(.flexible())
         ]
         
-        guard let requestError = requestError else {
-            return AnyView(
-                ScrollView(.vertical, showsIndicators: true, content: {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 5, pinnedViews: [], content: {
-                        ForEach(RemoteCommand.actionMenuArray(), id: \.self) { command in
-                            Button(String(describing: command)) {
-                                actionMenuButtonPressed(command: command)
-                            }
-                        }
-                    })
-                })
-            )
-        }
-        
         return AnyView(
-            ScrollView(.vertical, showsIndicators: true, content:{
-                errorAlertView(error: requestError)
+            ScrollView(.vertical, showsIndicators: true, content: {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 5, pinnedViews: [], content: {
+                    ForEach(RemoteCommand.actionMenuArray(), id: \.self) { command in
+                        Button(String(describing: command)) {
+                            actionMenuButtonPressed(command: command)
+                        }
+                    }
+                })
             })
         )
     }
@@ -230,8 +216,11 @@ struct ContentView: View {
     
     private func sendRemoteCommand(command: RemoteCommand) {
         print(command)
+        isLoading = true
+
         requestHandler.sendRemoteCommand(command: command.rawValue) { (error) in
-            if let error = error {
+            isLoading = false
+            if let error = error, error.code != .Cancelled {
                 setError(error: error)
             } else {
                 requestError = nil
@@ -255,7 +244,7 @@ extension ContentView: ControlCommandHandlerDelegate {
     }
     
     func onConfirmTwice() {
-        displayActionMenu = true
+        activeSheet = .TvOptions
         WKInterfaceDevice.current().play(.success)
     }
 }

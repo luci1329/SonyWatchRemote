@@ -8,19 +8,22 @@
 import SwiftUI
 
 struct FloatingButton: View {
-    var icon: String
+    var iconOn = "questionmark"
+    var iconOff = "questionmark"
     var size: CGFloat
-    @Binding var toggled: Bool
-
+    var toggled: Bool
+    
     var body: some View {
         ZStack {
-            Circle()
-                .foregroundColor(toggled ? .green : .gray)
-                .frame(width: size, height: size)
-            Image(systemName: "add")
+            Image(systemName: toggled ? iconOn : iconOff)
                 .imageScale(.large)
-                .foregroundColor(.white)
+                .foregroundColor(toggled ? .green : .white)
         }
-//        .shadow(color: .gray, radius: 0.2, x: 1, y: 1)
     }
+}
+
+func floatingButton(iconOn: String = "questionmark", iconOff: String = "questionmark", size: CGFloat, toggled: Bool, onPress: @escaping () -> Void) -> AnyView {
+    AnyView(
+        FloatingButton(iconOn: iconOn, iconOff: iconOff, size: size, toggled: toggled).onTapGesture(perform: onPress)
+    )
 }

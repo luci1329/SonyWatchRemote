@@ -8,21 +8,14 @@
 import SwiftUI
 
 struct SegmentedControl: View {
-    var values: [RemoteButton] = []
+    var values: [AnyView] = []
     @State var isFocused = false
-    @Binding var highlightedTag: Int
-    
-//    init(highlightedTag: Binding<Int>, elements: [RemoteButton]) {
-//        values = elements
-//        self._highlightedTag = highlightedTag
-//    }
     
     var body: some View {
-        HStack(alignment: .center, spacing: 15, content: {
-            ForEach(values.indices) { i in
-                Text(values[i].displayName).onTapGesture(perform: values[i].onPress)
-                    .foregroundColor(highlightedTag == values[i].tag ? Color.green : Color.white)
-                if (i < values.count - 1) {
+        HStack(alignment: .center, spacing: 20, content: {
+            ForEach(0..<values.count) { index in
+                values[index]
+                if (index < values.count - 1) {
                     Divider().frame(width: 1, height: 30, alignment: .center)
                 }
             }
