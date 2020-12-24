@@ -54,7 +54,12 @@ struct ContentView: View {
     @State var hasCommands = false
     @State var activeSheet: ActiveSheet?
     @State var viewDidLoad = false
-    @State var isLoading = false
+    @State var isLoadingCommands = false
+    @State var isSendingCommand = false
+
+    var isLoading: Bool {
+        return isLoadingCommands || isSendingCommand
+    }
     
     @State var requestError: RequestError? {
         didSet {
@@ -107,10 +112,10 @@ struct ContentView: View {
     }
     
     func fetchCommands(fullReload: Bool = false) {
-        isLoading = true
+        isLoadingCommands = true
         hasCommands = false
         requestHandler.getRemoteCommands(fullReload: fullReload) { (cmds, error) in
-            isLoading = false
+            isLoadingCommands = false
 
             guard let error = error else {
                 hasCommands = true
@@ -215,11 +220,13 @@ struct ContentView: View {
     }
     
     private func sendRemoteCommand(command: RemoteCommand) {
+        guard !isLoadingCommands else { return }
+        
         print(command)
-        isLoading = true
+        isSendingCommand = true
 
         requestHandler.sendRemoteCommand(command: command.rawValue) { (error) in
-            isLoading = false
+            isSendingCommand = false
             if let error = error, error.code != .Cancelled {
                 setError(error: error)
             } else if error == nil {
